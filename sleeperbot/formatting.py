@@ -21,8 +21,11 @@ NO_TROPHY_DATA = "No matchup data available for trophies."
 _NO_DATA_SENTINELS = frozenset({NO_MATCHUP_DATA, NO_TROPHY_DATA})
 
 # Sleeper has no team-abbreviation field, so reports lead with team names and
-# pad them to a common column instead.
-NAME_WIDTH = 18
+# pad them to a common column instead. The column is sized to the longest name
+# actually in the league rather than a fixed width, so nothing is truncated
+# unless someone picks a genuinely absurd name -- past MAX_NAME_WIDTH the line
+# gets wide enough to wrap on a phone, which is worse than clipping one team.
+MAX_NAME_WIDTH = 24
 BAR_WIDTH = 12
 _EIGHTHS = "▏▎▍▌▋▊▉█"
 
@@ -46,8 +49,13 @@ def _played(box_scores):
     return [m for m in box_scores if not m.is_bye]
 
 
-def _clip(name, width=NAME_WIDTH):
-    return name if len(name) <= width else name[:width]
+def _clip(name, width):
+    return name if len(name) <= width else name[: width - 1] + "…"
+
+
+def _name_width(names):
+    """Width of the team-name column: the longest name present, within reason."""
+    return min(max((len(n) for n in names), default=0), MAX_NAME_WIDTH)
 
 
 def _bar(value, peak, width=BAR_WIDTH):
@@ -77,6 +85,8 @@ def build_scoreboard(league, week=None, box_scores=None, final=False):
         return NO_MATCHUP_DATA
 
     peak = max(max(m.home_score, m.away_score) for m in games)
+    width = _name_width([t.name for m in games for t in (m.home, m.away)])
+
     blocks = []
     for m in games:
         if m.home_score >= m.away_score:
@@ -84,8 +94,8 @@ def build_scoreboard(league, week=None, box_scores=None, final=False):
         else:
             win, lose, ws, ls = m.away, m.home, m.away_score, m.home_score
         blocks.append(
-            f"{_clip(win.name):<{NAME_WIDTH}} {ws:>7.2f} {_bar(ws, peak):<{BAR_WIDTH + 1}}\n"
-            f"{_clip(lose.name):<{NAME_WIDTH}} {ls:>7.2f} {_bar(ls, peak):<{BAR_WIDTH + 1}}{ls - ws:>7.2f}"
+            f"{_clip(win.name, width):<{width}} {ws:>7.2f} {_bar(ws, peak):<{BAR_WIDTH + 1}}\n"
+            f"{_clip(lose.name, width):<{width}} {ls:>7.2f} {_bar(ls, peak):<{BAR_WIDTH + 1}}{ls - ws:>7.2f}"
         )
 
     header = "Final Score Update" if final else "Score Update"
@@ -116,8 +126,9 @@ def build_matchups(league, week=None, box_scores=None):
     records = _align_records(
         [f"{t.wins}-{t.losses}" for m in games for t in (m.home, m.away)]
     )
+    width = _name_width([m.home.name for m in games])
     rows = [
-        f"{_clip(m.home.name):<{NAME_WIDTH}} ({home}) vs ({away}) {m.away.name}"
+        f"{_clip(m.home.name, width):<{width}} ({home}) vs ({away}) {m.away.name}"
         for m, home, away in zip(games, records[::2], records[1::2])
     ]
     return "\n".join(["Matchups", ""] + rows)
@@ -125,12 +136,15 @@ def build_matchups(league, week=None, box_scores=None):
 
 def build_close_scores(league, week=None, box_scores=None, threshold=15.0):
     box_scores = box_scores if box_scores is not None else league.box_scores(week)
+    games = _played(box_scores)
+    width = _name_width([m.home.name for m in games])
+
     rows = []
-    for m in _played(box_scores):
+    for m in games:
         margin = abs(m.home_score - m.away_score)
         if margin <= threshold:
             rows.append(
-                f"{_clip(m.home.name):<{NAME_WIDTH}} {m.home_score:>7.2f} - "
+                f"{_clip(m.home.name, width):<{width}} {m.home_score:>7.2f} - "
                 f"{m.away_score:>7.2f} {m.away.name}"
             )
     if not rows:
@@ -320,16 +334,16 @@ def build_power_rankings(league, week=None):
 
     team_by_roster = {t.roster_id: t for t in league.teams()}
     peak = max(score for _, score in ranking) or 1.0
+    ranked = [(pos, team_by_roster[rid], score)
+              for pos, (rid, score) in enumerate(ranking, start=1)
+              if rid in team_by_roster]
+    width = _name_width([team.name for _, team, _ in ranked])
 
-    rows = []
-    for pos, (roster_id, score) in enumerate(ranking, start=1):
-        team = team_by_roster.get(roster_id)
-        if not team:
-            continue
-        rows.append(
-            f"{pos:2}. {_clip(team.name):<{NAME_WIDTH}} "
-            f"{_bar(score, peak):<{BAR_WIDTH + 1}} {score:5.1f}"
-        )
+    rows = [
+        f"{pos:2}. {_clip(team.name, width):<{width}} "
+        f"{_bar(score, peak):<{BAR_WIDTH + 1}} {score:5.1f}"
+        for pos, team, score in ranked
+    ]
     return "\n".join(["Power Rankings", ""] + rows)
 
 
