@@ -150,15 +150,39 @@ def build_matchups(league, week=None, box_scores=None):
     if not games:
         return NO_MATCHUP_DATA
 
-    records = _align_records(
-        [f"{t.wins}-{t.losses}" for m in games for t in (m.home, m.away)]
+    # One team per line, each next to its own record, seeded by current
+    # standings position -- a single line pairing both teams runs wide enough
+    # to scroll sideways on a phone, and puts the away record before the away
+    # team it belongs to.
+    seed = {team.roster_id: pos for pos, team in enumerate(league.standings(), start=1)}
+    teams = [t for m in games for t in (m.home, m.away)]
+    width = _name_width([t.name for t in teams])
+    records = dict(
+        zip(
+            (t.roster_id for t in teams),
+            _align_records([f"{t.wins}-{t.losses}" for t in teams]),
+        )
     )
-    width = _name_width([m.home.name for m in games])
-    rows = [
-        f"{_clip(m.home.name, width):<{width}} ({home}) vs ({away}) {m.away.name}"
-        for m, home, away in zip(games, records[::2], records[1::2])
-    ]
-    return "\n".join(["Matchups", ""] + rows)
+
+    # Before anyone has played, every record is 0-0 and the standings order is
+    # arbitrary. Printing both columns would imply a pecking order that does
+    # not exist yet, so week one lists names only.
+    played_yet = any(team.wins or team.losses for team in teams)
+
+    blocks = []
+    for m in games:
+        lines = []
+        for team in (m.home, m.away):
+            if played_yet:
+                lines.append(
+                    f"{seed.get(team.roster_id, 0):2}  "
+                    f"{_clip(team.name, width):<{width}}  {records[team.roster_id]}"
+                )
+            else:
+                lines.append(_clip(team.name, width))
+        blocks.append("\n".join(lines))
+
+    return "\n".join(["Matchups", ""] + ["\n\n".join(blocks)])
 
 
 def build_close_scores(league, week=None, box_scores=None, threshold=15.0):
