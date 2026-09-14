@@ -4,12 +4,12 @@ services:
     restart: always
     environment:
       # Find this in your Sleeper league URL: sleeper.app/leagues/<LEAGUE_ID>/...
-      SLEEPER_LEAGUE_ID: ""
+      SLEEPER_LEAGUE_ID: "${SLEEPER_LEAGUE_ID:?Set SLEEPER_LEAGUE_ID}"
       # Discord server -> channel settings -> Integrations -> Webhooks -> New Webhook -> Copy URL
-      DISCORD_WEBHOOK_URL: ""
-      TIMEZONE: "America/New_York"
-      # START_DATE: "2026-09-10"
-      # END_DATE: "2027-01-10"
-      # CLOSE_SCORES_THRESHOLD: "15"
-      # DAILY_WAIVER: "false"
-      # INIT_MSG: "SleeperBot is online!"
+      DISCORD_WEBHOOK_URL: "${DISCORD_WEBHOOK_URL:?Set DISCORD_WEBHOOK_URL}"
+      TIMEZONE: "${TIMEZONE:-America/New_York}"
+      START_DATE: "${START_DATE:-2026-09-10}"
+      END_DATE: "${END_DATE:-2027-01-10}"
+      CLOSE_SCORES_THRESHOLD: "${CLOSE_SCORES_THRESHOLD:-15}"
+      DAILY_WAIVER: "${DAILY_WAIVER:-false}"
+      INIT_MSG: "${INIT_MSG:-SleeperBot is online!}"
