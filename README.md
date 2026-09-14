@@ -33,6 +33,28 @@ multi-arch base image, so no cross-compilation is needed.
 | `CLOSE_SCORES_THRESHOLD` | no | `15` | Point difference still called "close" |
 | `DAILY_WAIVER` | no | `false` | Post waiver report daily instead of just Wednesday |
 | `INIT_MSG` | no | (empty) | Message posted once on startup |
+| `DISCORD_BOT_TOKEN` | no | - | Enables live slash commands (see below) |
+| `DISCORD_GUILD_ID` | no | - | Instant slash-command sync to one server while testing |
+
+## Enabling slash commands
+
+By default SleeperBot only pushes scheduled reports via the webhook. Setting
+`DISCORD_BOT_TOKEN` additionally starts a live bot that responds to
+`/standings`, `/matchups`, `/scoreboard`, `/close_scores`, `/trophies`,
+`/power_rankings`, and `/waiver_report` typed directly in Discord — on top of,
+not instead of, the scheduled webhook posts.
+
+One-time setup in the [Discord Developer Portal](https://discord.com/developers/applications):
+
+1. **New Application** (or reuse an existing one).
+2. **Bot** tab → **Add Bot** → copy the token → `DISCORD_BOT_TOKEN`.
+3. **OAuth2 → URL Generator** → scopes `bot` + `applications.commands`,
+   permission `Send Messages` → open the generated URL to invite it to your
+   server.
+4. *(Optional, for instant command sync while testing)* right-click your
+   server in Discord → **Copy Server ID** → `DISCORD_GUILD_ID`. Without this,
+   commands still work, but can take up to an hour to appear globally after
+   startup.
 
 ## What's not supported (and why)
 
