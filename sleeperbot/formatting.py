@@ -39,10 +39,37 @@ FLEX_ELIGIBILITY = {
 BENCH_SLOTS = {"BN", "IR", "TAXI"}
 
 
+# Per-report presentation: emoji title, embed colour, and whether the body is a
+# table. Column padding only survives in a code block -- Discord renders normal
+# message text in a proportional font, where the padding collapses -- so every
+# tabular report sets monospace. Prose-style reports read better without it.
+REPORT_STYLE = {
+    "get_scoreboard": ("🏈 Score Update", 0x3498DB, True),
+    "get_final": ("🏁 Final Score", 0x3498DB, True),
+    "get_standings": ("📊 Current Standings", 0xF1C40F, True),
+    "get_matchups": ("📅 Matchups", 0x2ECC71, True),
+    "get_close_scores": ("⚡ Close Scores", 0x3498DB, True),
+    "get_power_rankings": ("💪 Power Rankings", 0x9B59B6, True),
+    "get_trophies": ("🏆 Trophies of the Week", 0xE67E22, False),
+    "get_waiver_report": ("💰 Waiver Report", 0x1ABC9C, False),
+    "get_monitor": ("🚑 Players to Monitor", 0xE74C3C, False),
+}
+DEFAULT_STYLE = ("SleeperBot", 0x99AAB5, False)
+
+
 def has_sendable_content(message):
     if not message or not message.strip():
         return False
     return message.strip() not in _NO_DATA_SENTINELS
+
+
+def strip_header(text):
+    """
+    Drop a report's own header line, which becomes the embed title instead of
+    sitting inside the body.
+    """
+    body = text.split("\n", 1)[1] if "\n" in text else ""
+    return body.strip("\n")
 
 
 def _played(box_scores):
@@ -226,23 +253,23 @@ def build_trophies(league, week=None, box_scores=None):
     text = [
         "Trophies of the week:",
         "",
-        "👑 High score 👑",
+        "**👑 High score 👑**",
         f"{high_team.name} with {high_score:.2f} points",
         "",
-        "💩 Low score 💩",
+        "**💩 Low score 💩**",
         f"{low_team.name} with {low_score:.2f} points",
     ]
 
     if blowout_winner:
         text += [
             "",
-            "😱 Blow out 😱",
+            "**😱 Blow out 😱**",
             f"{blowout_winner.name} blew out {blowout_loser.name} by {blowout_margin:.2f} points",
         ]
     if close_winner:
         text += [
             "",
-            "😅 Close win 😅",
+            "**😅 Close win 😅**",
             f"{close_winner.name} barely beat {close_loser.name} by {close_margin:.2f} points",
         ]
 
@@ -280,10 +307,10 @@ def _luck_trophies(games):
 
     return [
         "",
-        "🍀 Lucky 🍀",
+        "**🍀 Lucky 🍀**",
         f"{lucky.name} was {lucky_w}-{lucky_l} against the league, but still got the win",
         "",
-        "😡 Unlucky 😡",
+        "**😡 Unlucky 😡**",
         f"{unlucky.name} was {unlucky_w}-{unlucky_l} against the league, but still took an L",
     ]
 
@@ -311,10 +338,10 @@ def _manager_trophies(league, games):
 
     return [
         "",
-        "🤖 Best Manager 🤖",
+        "**🤖 Best Manager 🤖**",
         f"{best_team.name} scored {best_pct:.2f}% of their optimal score!",
         "",
-        "🤡 Worst Manager 🤡",
+        "**🤡 Worst Manager 🤡**",
         f"{worst_team.name} left {worst_optimal - worst_actual:.2f} points on their bench. "
         f"Only scoring {worst_pct:.2f}% of their optimal score.",
     ]
@@ -375,7 +402,7 @@ def build_monitor(league, week=None, box_scores=None):
                 )
             if flagged:
                 flagged.sort()
-                blocks.append(f"{team.name}:\n" + "\n".join(line for _, line in flagged))
+                blocks.append(f"**{team.name}**\n" + "\n".join(line for _, line in flagged))
 
     if not blocks:
         return "No Players to Monitor this week. Good Luck!"
@@ -394,7 +421,7 @@ def build_waiver_report(league, week=None, today=None):
         if txn_date != today:
             continue
 
-        lines = [item.team_name]
+        lines = [f"**{item.team_name}**"]
         for add in item.adds:
             suffix = f" (${item.faab})" if item.faab is not None else ""
             lines.append(f"ADDED {add}{suffix}")

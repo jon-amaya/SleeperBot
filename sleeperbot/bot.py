@@ -2,7 +2,7 @@ import logging
 
 from sleeperbot import formatting
 from sleeperbot.config import load_config
-from sleeperbot.discord_client import send_message
+from sleeperbot.discord_client import build_embeds, send_embeds, send_message
 from sleeperbot.league import SleeperLeague
 from sleeperbot.sleeper_client import SleeperClient
 
@@ -28,36 +28,57 @@ def bot(function, config=None, league=None):
 
     logger.info("Function: %s", function)
 
+    # Each entry renders as its own embed, so a report that pairs two different
+    # kinds of content (get_final: a table plus prose trophies) keeps each in
+    # the presentation that suits it.
+    reports = []
+
     if function == "get_standings":
-        text = formatting.build_standings(league)
+        reports = [("get_standings", formatting.build_standings(league))]
     elif function == "get_matchups":
-        text = formatting.build_matchups(league)
+        reports = [("get_matchups", formatting.build_matchups(league))]
     elif function == "get_scoreboard":
-        text = formatting.build_scoreboard(league)
+        reports = [("get_scoreboard", formatting.build_scoreboard(league))]
     elif function == "get_close_scores":
-        text = formatting.build_close_scores(league, threshold=config["close_scores_threshold"])
+        reports = [(
+            "get_close_scores",
+            formatting.build_close_scores(league, threshold=config["close_scores_threshold"]),
+        )]
     elif function == "get_trophies":
-        text = formatting.build_trophies(league)
+        reports = [("get_trophies", formatting.build_trophies(league))]
     elif function == "get_power_rankings":
-        text = formatting.build_power_rankings(league)
+        reports = [("get_power_rankings", formatting.build_power_rankings(league))]
     elif function == "get_waiver_report":
-        text = formatting.build_waiver_report(league)
+        reports = [("get_waiver_report", formatting.build_waiver_report(league))]
     elif function == "get_monitor":
-        text = formatting.build_monitor(league)
+        reports = [("get_monitor", formatting.build_monitor(league))]
     elif function == "get_final":
         week = league.current_week - 1
         box_scores = league.box_scores(week)
-        scores = formatting.build_scoreboard(league, week=week, box_scores=box_scores, final=True)
-        if scores == formatting.NO_MATCHUP_DATA:
-            text = scores
-        else:
-            trophies = formatting.build_trophies(league, week=week, box_scores=box_scores)
-            text = f"{scores}\n\n{trophies}"
+        reports = [
+            ("get_final", formatting.build_scoreboard(
+                league, week=week, box_scores=box_scores, final=True)),
+            ("get_trophies", formatting.build_trophies(
+                league, week=week, box_scores=box_scores)),
+        ]
     elif function == "init":
-        text = config.get("init_msg", "")
+        message = config.get("init_msg", "")
+        if message:
+            send_message(config["webhook_url"], message)
+        return
     else:
         logger.warning("Unknown function: %s", function)
         return
 
-    if formatting.has_sendable_content(text):
-        send_message(config["webhook_url"], text)
+    embeds = []
+    footer = f"{league.name} • {league.season}"
+    for key, text in reports:
+        if not formatting.has_sendable_content(text):
+            continue
+        title, color, monospace = formatting.REPORT_STYLE.get(key, formatting.DEFAULT_STYLE)
+        embeds += build_embeds(
+            title, formatting.strip_header(text), color, monospace, footer=footer
+        )
+
+    if embeds:
+        send_embeds(config["webhook_url"], embeds)
