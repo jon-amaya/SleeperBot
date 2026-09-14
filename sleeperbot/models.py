@@ -29,6 +29,11 @@ class Matchup:
     away_score: float
     home_bench_points: float = 0.0
     away_bench_points: float = 0.0
+    # Raw Sleeper matchup entries, kept so lineup-level reports (optimal
+    # lineup, injury monitor) can read starters and per-player points without
+    # a second API call.
+    home_entry: Optional[dict] = None
+    away_entry: Optional[dict] = None
 
     @property
     def is_bye(self):

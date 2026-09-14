@@ -41,8 +41,9 @@ multi-arch base image, so no cross-compilation is needed.
 By default SleeperBot only pushes scheduled reports via the webhook. Setting
 `DISCORD_BOT_TOKEN` additionally starts a live bot that responds to
 `/standings`, `/matchups`, `/scoreboard`, `/close_scores`, `/trophies`,
-`/power_rankings`, and `/waiver_report` typed directly in Discord — on top of,
-not instead of, the scheduled webhook posts.
+`/power_rankings`, `/waiver_report`, and `/monitor` typed directly in Discord
+— on top of, not instead of, the scheduled webhook posts. Anyone in the server
+can run them and replies post publicly to the channel.
 
 One-time setup in the [Discord Developer Portal](https://discord.com/developers/applications):
 
@@ -56,20 +57,37 @@ One-time setup in the [Discord Developer Portal](https://discord.com/developers/
    commands still work, but can take up to an hour to appear globally after
    startup.
 
+## Reports
+
+Message formats follow
+[dtcarls/fantasy_football_chat_bot](https://github.com/dtcarls/fantasy_football_chat_bot),
+the project GameDayBot grew out of — a header line plus rows, as plain text.
+
+| Report | When | Notes |
+|---|---|---|
+| Score update | Fri & Mon 7:30am, Sun 4pm & 8pm | Bars scaled to the week's high score |
+| Final score + trophies | Tue 7:30am | Last week's results |
+| Standings | Wed 7:30am | With a playoff line at your league's cutoff |
+| Waiver report | Wed 7:31am (or daily) | FAAB amounts when the league uses them |
+| Matchups | Thu 7:30pm | |
+| Players to monitor | Sun 7:30am | Injured starters, from Sleeper's player feed |
+| Close scores | Mon 6:30pm | Within `CLOSE_SCORES_THRESHOLD` |
+| Power rankings | Tue 6:30pm | Two-step dominance: 80% all-play, 15% points, 5% margin |
+
+Trophies awarded: 👑 high score, 💩 low score, 😱 blowout, 😅 close win,
+🍀 lucky, 😡 unlucky, 🤖 best manager, 🤡 worst manager.
+
 ## What's not supported (and why)
 
 Sleeper's free public API has no player projections and no playoff-odds
-simulation (ESPN's API has both). So, compared to ESPN-based bots:
+simulation, both of which ESPN provides. So compared to ESPN-based bots:
 
-- No projected scoreboard (only actual/live scores)
-- No live "player about to score zero" monitor report
-- No over/under-achiever trophies (need projected vs. actual)
-- Power rankings show rank, score, and week-over-week trend, but no
-  playoff-odds percentage
+- No projected scoreboard — only actual and live scores
+- No over/under-achiever trophies, which compare actual against projected
+- Power rankings carry no playoff-odds percentage
 
-Everything else — standings, matchups, close scores (based on actual scores),
-high/low/blowout/close-win/lucky/unlucky/most-bench-points trophies, power
-rankings, and FAAB waiver reports — is fully supported.
+Everything else ports over. The injury monitor actually works *better* here:
+Sleeper's player feed carries `injury_status` directly, with no scraping.
 
 ## Development
 

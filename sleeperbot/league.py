@@ -26,6 +26,22 @@ class SleeperLeague:
         return int((self._settings.get("settings") or {}).get("waiver_type", 0)) == 2
 
     @property
+    def name(self):
+        return self._settings.get("name") or "League"
+
+    @property
+    def season(self):
+        return self._settings.get("season") or ""
+
+    @property
+    def roster_positions(self):
+        return self._settings.get("roster_positions") or []
+
+    @property
+    def playoff_teams(self):
+        return int((self._settings.get("settings") or {}).get("playoff_teams") or 0)
+
+    @property
     def current_week(self):
         # settings.leg is this league's own current week, which is what we want --
         # state/nfl's "week" is the live NFL week across all of Sleeper, which is
@@ -42,9 +58,10 @@ class SleeperLeague:
         for roster in self._rosters:
             user = user_by_id.get(roster.get("owner_id"), {})
             metadata = user.get("metadata") or {}
-            names[roster["roster_id"]] = (
-                metadata.get("team_name") or user.get("display_name") or f"Team {roster['roster_id']}"
-            )
+            # Owners often leave stray whitespace in a custom team name, which
+            # would otherwise show up mid-sentence in the trophy lines.
+            name = (metadata.get("team_name") or user.get("display_name") or "").strip()
+            names[roster["roster_id"]] = name or f"Team {roster['roster_id']}"
         return names
 
     def team_name(self, roster_id):
@@ -87,6 +104,15 @@ class SleeperLeague:
     def player_position(self, player_id):
         return (self.players().get(str(player_id)) or {}).get("position", "N/A")
 
+    def player_positions(self, player_id):
+        """Every slot type this player is eligible for, for optimal-lineup math."""
+        player = self.players().get(str(player_id)) or {}
+        return set(player.get("fantasy_positions") or [])
+
+    def player_injury(self, player_id):
+        """Sleeper's injury designation ('Out', 'Questionable', 'IR', ...) or None."""
+        return (self.players().get(str(player_id)) or {}).get("injury_status")
+
     def box_scores(self, week=None):
         week = week or self.current_week
         raw = self.client.get_matchups(week)
@@ -110,6 +136,7 @@ class SleeperLeague:
                         home_score=entry.get("points") or 0.0,
                         away_score=0.0,
                         home_bench_points=self._bench_points(entry),
+                        home_entry=entry,
                     )
                 )
                 continue
@@ -124,6 +151,8 @@ class SleeperLeague:
                     away_score=away_entry.get("points") or 0.0,
                     home_bench_points=self._bench_points(home_entry),
                     away_bench_points=self._bench_points(away_entry),
+                    home_entry=home_entry,
+                    away_entry=away_entry,
                 )
             )
         return matchups
