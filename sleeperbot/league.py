@@ -19,6 +19,11 @@ class SleeperLeague:
         self._users = client.get_users()
         self._rosters = client.get_rosters()
         self._players = None  # fetched lazily; large payload, only needed for waiver reports
+        # Trophy Case, Win Matrix, Fortune Index and power rankings each walk
+        # every completed week, so without this they'd refetch the same weeks
+        # dozens of times per run.
+        self._box_scores = {}
+        self._transactions = {}
         self._name_by_roster = self._build_team_names()
 
     @property
@@ -115,6 +120,9 @@ class SleeperLeague:
 
     def box_scores(self, week=None):
         week = week or self.current_week
+        if week in self._box_scores:
+            return self._box_scores[week]
+
         raw = self.client.get_matchups(week)
         team_by_roster = {t.roster_id: t for t in self.teams()}
 
@@ -155,7 +163,16 @@ class SleeperLeague:
                     away_entry=away_entry,
                 )
             )
+
+        self._box_scores[week] = matchups
         return matchups
+
+    def raw_transactions(self, week):
+        """Unparsed transactions for the week -- trades need fields the
+        TransactionItem model deliberately flattens away."""
+        if week not in self._transactions:
+            self._transactions[week] = self.client.get_transactions(week)
+        return self._transactions[week]
 
     @staticmethod
     def _bench_points(entry):
@@ -164,7 +181,7 @@ class SleeperLeague:
         return sum(pts or 0.0 for player_id, pts in players_points.items() if player_id not in starters)
 
     def transactions_for_week(self, week):
-        raw = self.client.get_transactions(week)
+        raw = self.raw_transactions(week)
         team_by_roster = {t.roster_id: t for t in self.teams()}
 
         items = []

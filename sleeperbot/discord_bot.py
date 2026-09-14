@@ -99,6 +99,22 @@ class SleeperBotClient(discord.Client):
         async def monitor(interaction: discord.Interaction):
             await respond(interaction, formatting.build_monitor, "get_monitor")
 
+        @tree.command(name="trades", description="Trades completed today")
+        async def trades(interaction: discord.Interaction):
+            await respond(interaction, formatting.build_trades, "get_trades")
+
+        @tree.command(name="fortune", description="Who the schedule has helped and hurt")
+        async def fortune(interaction: discord.Interaction):
+            await respond(interaction, formatting.build_fortune_index, "get_fortune_index")
+
+        @tree.command(name="winmatrix", description="Standings if everyone played everyone")
+        async def winmatrix(interaction: discord.Interaction):
+            await respond(interaction, formatting.build_win_matrix, "get_win_matrix")
+
+        @tree.command(name="trophycase", description="Season trophy tally")
+        async def trophycase(interaction: discord.Interaction):
+            await respond(interaction, formatting.build_trophy_case, "get_trophy_case")
+
     async def setup_hook(self):
         guild_id = self.config.get("guild_id")
         if guild_id:

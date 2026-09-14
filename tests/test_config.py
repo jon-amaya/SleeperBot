@@ -25,7 +25,6 @@ def test_defaults_applied(monkeypatch):
     monkeypatch.delenv("DISCORD_GUILD_ID", raising=False)
     config = load_config()
     assert config["close_scores_threshold"] == 15.0
-    assert config["daily_waiver"] is False
     assert config["bot_token"] is None
     assert config["guild_id"] is None
 

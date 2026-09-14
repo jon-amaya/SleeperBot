@@ -4,68 +4,49 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from sleeperbot.bot import bot
 from sleeperbot.config import load_config
 
-# close scores:    monday evening at 6:30pm east coast time.
-# power rankings:  tuesday evening at 6:30pm local time.
-# final scores:    tuesday morning at 7:30am local time.
-# standings:       wednesday morning at 7:30am local time.
-# waiver report:   wednesday morning at 7:31am local time (or daily).
-# matchups:        thursday evening at 7:30pm east coast time.
-# monitor:         sunday morning at 7:30am local time.
-# scoreboard:      friday and monday mornings, and sunday afternoon/evening.
+# GameDayBot's schedule, matched message for message. ET entries are fixed
+# Eastern because they track kickoff windows; everything else follows the
+# league's own TIMEZONE.
+#
+# (function, day_of_week, hour, minute, eastern)
+JOBS = [
+    ("get_waiver_report", "*", 7, 30, False),
+    ("get_trades", "*", 7, 31, False),
+    ("get_final", "tue", 7, 30, False),
+    ("get_fortune_index", "tue", 8, 30, False),
+    ("get_trophy_case", "tue", 9, 0, False),
+    ("get_power_rankings", "tue", 18, 30, False),
+    ("get_standings", "wed", 7, 30, False),
+    ("get_win_matrix", "wed", 7, 31, False),
+    ("get_matchups", "thu", 19, 30, True),
+    ("get_scoreboard", "fri,mon", 7, 30, False),
+    ("get_monitor", "sun", 7, 30, False),
+    ("get_scoreboard", "sun", 16, 0, True),
+    ("get_scoreboard", "sun", 20, 0, True),
+    ("get_close_scores", "mon", 18, 30, True),
+]
+
+GAME_TIMEZONE = "America/New_York"
 
 
 def _add_jobs(sched, config):
-    game_tz = "America/New_York"
-    my_tz = config["timezone"]
     start_date = config["start_date"]
     end_date = config["end_date"]
 
-    sched.add_job(
-        bot, "cron", ["get_close_scores"], id="close_scores",
-        day_of_week="mon", hour=18, minute=30,
-        start_date=start_date, end_date=end_date, timezone=game_tz, replace_existing=True,
-    )
-    sched.add_job(
-        bot, "cron", ["get_power_rankings"], id="power_rankings",
-        day_of_week="tue", hour=18, minute=30,
-        start_date=start_date, end_date=end_date, timezone=my_tz, replace_existing=True,
-    )
-    sched.add_job(
-        bot, "cron", ["get_final"], id="final",
-        day_of_week="tue", hour=7, minute=30,
-        start_date=start_date, end_date=end_date, timezone=my_tz, replace_existing=True,
-    )
-    sched.add_job(
-        bot, "cron", ["get_standings"], id="standings",
-        day_of_week="wed", hour=7, minute=30,
-        start_date=start_date, end_date=end_date, timezone=my_tz, replace_existing=True,
-    )
-    waiver_days = "*" if config["daily_waiver"] else "wed"
-    sched.add_job(
-        bot, "cron", ["get_waiver_report"], id="waiver_report",
-        day_of_week=waiver_days, hour=7, minute=31,
-        start_date=start_date, end_date=end_date, timezone=my_tz, replace_existing=True,
-    )
-    sched.add_job(
-        bot, "cron", ["get_matchups"], id="matchups",
-        day_of_week="thu", hour=19, minute=30,
-        start_date=start_date, end_date=end_date, timezone=game_tz, replace_existing=True,
-    )
-    sched.add_job(
-        bot, "cron", ["get_scoreboard"], id="scoreboard1",
-        day_of_week="fri,mon", hour=7, minute=30,
-        start_date=start_date, end_date=end_date, timezone=my_tz, replace_existing=True,
-    )
-    sched.add_job(
-        bot, "cron", ["get_monitor"], id="monitor",
-        day_of_week="sun", hour=7, minute=30,
-        start_date=start_date, end_date=end_date, timezone=my_tz, replace_existing=True,
-    )
-    sched.add_job(
-        bot, "cron", ["get_scoreboard"], id="scoreboard2",
-        day_of_week="sun", hour="16,20",
-        start_date=start_date, end_date=end_date, timezone=game_tz, replace_existing=True,
-    )
+    for index, (function, days, hour, minute, eastern) in enumerate(JOBS):
+        sched.add_job(
+            bot,
+            "cron",
+            [function],
+            id=f"{function}_{index}",
+            day_of_week=days,
+            hour=hour,
+            minute=minute,
+            start_date=start_date,
+            end_date=end_date,
+            timezone=GAME_TIMEZONE if eastern else config["timezone"],
+            replace_existing=True,
+        )
 
 
 def run():
