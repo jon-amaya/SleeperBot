@@ -1,3 +1,5 @@
+import json
+
 import requests
 
 # Discord hard-caps message content at 2000 characters and an embed
@@ -46,12 +48,35 @@ def build_embeds(title, body, color, monospace, footer=None):
     return embeds
 
 
-def send_embeds(webhook_url, embeds):
-    # Discord accepts at most 10 embeds per message.
+def attach_image(embeds, name, png):
+    """
+    Point the last embed at an image that will be uploaded with it. Discord
+    resolves attachment:// against the files in the same request.
+    """
+    if not embeds or not png:
+        return None
+    embeds[-1]["image"] = {"url": f"attachment://{name}"}
+    return (name, png)
+
+
+def send_embeds(webhook_url, embeds, files=None):
+    """
+    Files ride along with the first batch, since that is where the embed
+    referencing them sits. Discord accepts at most 10 embeds per message.
+    """
     for start in range(0, len(embeds), 10):
-        response = requests.post(
-            webhook_url, json={"embeds": embeds[start:start + 10]}, timeout=10
-        )
+        batch = embeds[start:start + 10]
+        batch_files = files if start == 0 else None
+
+        if batch_files:
+            payload = {
+                "payload_json": (None, json.dumps({"embeds": batch}), "application/json")
+            }
+            for index, (name, png) in enumerate(batch_files):
+                payload[f"files[{index}]"] = (name, png, "image/png")
+            response = requests.post(webhook_url, files=payload, timeout=30)
+        else:
+            response = requests.post(webhook_url, json={"embeds": batch}, timeout=10)
         response.raise_for_status()
 
 

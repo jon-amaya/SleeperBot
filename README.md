@@ -31,7 +31,6 @@ multi-arch base image, so no cross-compilation is needed.
 | `START_DATE` | no | `2026-09-10` | Scheduler start |
 | `END_DATE` | no | `2027-01-10` | Scheduler end |
 | `CLOSE_SCORES_THRESHOLD` | no | `15` | Point difference still called "close" |
-| `DAILY_WAIVER` | no | `false` | Post waiver report daily instead of just Wednesday |
 | `INIT_MSG` | no | (empty) | Message posted once on startup |
 | `DISCORD_BOT_TOKEN` | no | - | Enables live slash commands (see below) |
 | `DISCORD_GUILD_ID` | no | - | Instant slash-command sync to one server while testing |
@@ -41,7 +40,8 @@ multi-arch base image, so no cross-compilation is needed.
 By default SleeperBot only pushes scheduled reports via the webhook. Setting
 `DISCORD_BOT_TOKEN` additionally starts a live bot that responds to
 `/standings`, `/matchups`, `/scoreboard`, `/close_scores`, `/trophies`,
-`/power_rankings`, `/waiver_report`, and `/monitor` typed directly in Discord
+`/power_rankings`, `/waiver_report`, `/monitor`, `/trades`, `/fortune`,
+`/winmatrix` and `/trophycase` typed directly in Discord
 — on top of, not instead of, the scheduled webhook posts. Anyone in the server
 can run them and replies post publicly to the channel.
 
@@ -63,19 +63,31 @@ Message formats follow
 [dtcarls/fantasy_football_chat_bot](https://github.com/dtcarls/fantasy_football_chat_bot),
 the project GameDayBot grew out of — a header line plus rows, as plain text.
 
-| Report | When | Notes |
-|---|---|---|
-| Score update | Fri & Mon 7:30am, Sun 4pm & 8pm | Bars scaled to the week's high score |
-| Final score + trophies | Tue 7:30am | Last week's results |
-| Standings | Wed 7:30am | With a playoff line at your league's cutoff |
-| Waiver report | Wed 7:31am (or daily) | FAAB amounts when the league uses them |
-| Matchups | Thu 7:30pm | |
-| Players to monitor | Sun 7:30am | Injured starters, from Sleeper's player feed |
-| Close scores | Mon 6:30pm | Within `CLOSE_SCORES_THRESHOLD` |
-| Power rankings | Tue 6:30pm | Two-step dominance: 80% all-play, 15% points, 5% margin |
+| Day | Time | Report | Notes |
+|---|---|---|---|
+| Daily | 7:30am | Waiver report | FAAB amounts when the league uses them |
+| Daily | 7:31am | Trade announcements | Players, picks and FAAB, per side |
+| Tue | 7:30am | Final score + trophies | Plus the season score-trend chart |
+| Tue | 8:30am | Fortune Index | Plus the Bad Management chart |
+| Tue | 9:00am | Trophy Case | Season trophy tally |
+| Tue | 6:30pm | Power rankings | Plus the rankings trend chart |
+| Wed | 7:30am | Standings | Playoff line; plus the standings trend chart |
+| Wed | 7:31am | Win Matrix | Standings if everyone played everyone |
+| Thu | 7:30pm ET | Matchups | |
+| Fri, Mon | 7:30am | Score update | |
+| Sun | 7:30am | Players to monitor | Injured starters, from Sleeper's player feed |
+| Sun | 4pm, 8pm ET | Score update | |
+| Mon | 6:30pm ET | Close scores | Within `CLOSE_SCORES_THRESHOLD` |
+
+ET entries are fixed Eastern because they track kickoff windows; everything
+else follows `TIMEZONE`. Win Matrix and Trophy Case hold until two weeks of
+the season are complete.
 
 Trophies awarded: 👑 high score, 💩 low score, 😱 blowout, 😅 close win,
 🍀 lucky, 😡 unlucky, 🤖 best manager, 🤡 worst manager.
+
+Power rankings use a two-step dominance model: 80% all-play record, 15%
+points scored, 5% margin.
 
 ## What's not supported (and why)
 

@@ -9,7 +9,7 @@ projections, and power rankings carry no playoff percentage. Sleeper's free
 API publishes none of those.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sleeperbot import power_rankings as pr
 
@@ -19,15 +19,6 @@ NO_MATCHUP_DATA = "No matchup data available."
 NO_TROPHY_DATA = "No matchup data available for trophies."
 
 _NO_DATA_SENTINELS = frozenset({NO_MATCHUP_DATA, NO_TROPHY_DATA})
-
-# Sleeper has no team-abbreviation field, so reports lead with team names and
-# pad them to a common column instead. The column is sized to the longest name
-# actually in the league rather than a fixed width, so nothing is truncated
-# unless someone picks a genuinely absurd name -- past MAX_NAME_WIDTH the line
-# gets wide enough to wrap on a phone, which is worse than clipping one team.
-MAX_NAME_WIDTH = 24
-BAR_WIDTH = 12
-_EIGHTHS = "▏▎▍▌▋▊▉█"
 
 FLEX_ELIGIBILITY = {
     "FLEX": {"RB", "WR", "TE"},
@@ -39,22 +30,31 @@ FLEX_ELIGIBILITY = {
 BENCH_SLOTS = {"BN", "IR", "TAXI"}
 
 
-# Per-report presentation: emoji title, embed colour, and whether the body is a
-# table. Column padding only survives in a code block -- Discord renders normal
-# message text in a proportional font, where the padding collapses -- so every
-# tabular report sets monospace. Prose-style reports read better without it.
+# Per-report presentation: embed title, colour, and whether the body sits in a
+# code block. Tabular reports must: a code fence is the only place column
+# padding survives, since Discord renders ordinary message text in a
+# proportional font. Prose reports stay outside one so their emoji keep their
+# colour and markdown still renders.
 REPORT_STYLE = {
     "get_scoreboard": ("🏈 Score Update", 0x3498DB, True),
-    "get_final": ("🏁 Final Score", 0x3498DB, True),
+    "get_final": ("🏁 Final Score Update", 0x3498DB, True),
     "get_standings": ("📊 Current Standings", 0xF1C40F, True),
     "get_matchups": ("📅 Matchups", 0x2ECC71, True),
     "get_close_scores": ("⚡ Close Scores", 0x3498DB, True),
     "get_power_rankings": ("💪 Power Rankings", 0x9B59B6, True),
+    "get_fortune_index": ("🎲 Fortune Index", 0x9B59B6, True),
+    "get_win_matrix": ("🔢 Win Matrix", 0xF1C40F, True),
+    "get_trophy_case": ("👑 Trophy Case", 0xE67E22, True),
     "get_trophies": ("🏆 Trophies of the Week", 0xE67E22, False),
     "get_waiver_report": ("💰 Waiver Report", 0x1ABC9C, False),
     "get_monitor": ("🚑 Players to Monitor", 0xE74C3C, False),
+    "get_trades": ("🚨 Trade Announcement", 0xE91E63, False),
 }
 DEFAULT_STYLE = ("SleeperBot", 0x99AAB5, False)
+
+# Win Matrix and Trophy Case only say anything once there is a season to
+# summarise, so both hold until this many weeks are complete.
+MIN_WEEKS_FOR_SEASON_REPORTS = 2
 
 
 def has_sendable_content(message):
@@ -80,21 +80,9 @@ def _clip(name, width):
     return name if len(name) <= width else name[: width - 1] + "…"
 
 
-def _name_width(names):
+def _name_width(names, cap=22):
     """Width of the team-name column: the longest name present, within reason."""
-    return min(max((len(n) for n in names), default=0), MAX_NAME_WIDTH)
-
-
-def _bar(value, peak, width=BAR_WIDTH):
-    if peak <= 0:
-        return ""
-    filled = (value / peak) * width
-    full = int(filled)
-    out = "█" * full
-    remainder = filled - full
-    if remainder >= 0.0625 and full < width:
-        out += _EIGHTHS[min(int(remainder * 8), 7)]
-    return out
+    return min(max((len(n) for n in names), default=0), cap)
 
 
 def _align_records(records):
@@ -105,28 +93,58 @@ def _align_records(records):
     return [f"{w:>{wins_w}}-{r:<{rest_w}}" for w, r in parts]
 
 
+def abbreviations(teams):
+    """
+    Four-letter tags for the score tables, where two full names per line would
+    run too wide to read. Sleeper has no abbreviation field (ESPN does, which
+    is where GameDayBot's DYNK and PUNT come from), so these are derived:
+    leading alphanumerics of the name, widened and then numbered on collision
+    so no two teams ever share a tag.
+    """
+    tags = {}
+    used = set()
+    for team in teams:
+        letters = "".join(c for c in team.name if c.isalnum()).upper() or "TEAM"
+        tag = letters[:4]
+        if tag in used:
+            for width in range(5, len(letters) + 1):
+                if letters[:width] not in used:
+                    tag = letters[:width]
+                    break
+            else:
+                suffix = 2
+                while f"{letters[:3]}{suffix}" in used:
+                    suffix += 1
+                tag = f"{letters[:3]}{suffix}"
+        used.add(tag)
+        tags[team.roster_id] = tag
+    width = max((len(t) for t in tags.values()), default=4)
+    return {rid: tag.ljust(width) for rid, tag in tags.items()}
+
+
+def _tags_for(league, games):
+    """Abbreviations covering every team in these games, league roster first so
+    a team's tag stays the same from one report to the next."""
+    seen = {}
+    for team in list(league.teams()) + [t for m in games for t in (m.home, m.away)]:
+        if team and team.roster_id not in seen:
+            seen[team.roster_id] = team
+    return abbreviations(seen.values())
+
+
 def build_scoreboard(league, week=None, box_scores=None, final=False):
     box_scores = box_scores if box_scores is not None else league.box_scores(week)
     games = _played(box_scores)
     if not games:
         return NO_MATCHUP_DATA
 
-    peak = max(max(m.home_score, m.away_score) for m in games)
-    width = _name_width([t.name for m in games for t in (m.home, m.away)])
-
-    blocks = []
-    for m in games:
-        if m.home_score >= m.away_score:
-            win, lose, ws, ls = m.home, m.away, m.home_score, m.away_score
-        else:
-            win, lose, ws, ls = m.away, m.home, m.away_score, m.home_score
-        blocks.append(
-            f"{_clip(win.name, width):<{width}} {ws:>7.2f} {_bar(ws, peak):<{BAR_WIDTH + 1}}\n"
-            f"{_clip(lose.name, width):<{width}} {ls:>7.2f} {_bar(ls, peak):<{BAR_WIDTH + 1}}{ls - ws:>7.2f}"
-        )
-
+    tags = _tags_for(league, games)
+    rows = [
+        f"{tags[m.home.roster_id]} {m.home_score:6.2f} - {m.away_score:6.2f} {tags[m.away.roster_id]}"
+        for m in games
+    ]
     header = "Final Score Update" if final else "Score Update"
-    return "\n".join([header, ""] + ["\n\n".join(blocks)])
+    return "\n".join([header, ""] + rows)
 
 
 def build_standings(league):
@@ -139,7 +157,7 @@ def build_standings(league):
 
     cutoff = league.playoff_teams
     if 0 < cutoff < len(rows):
-        rows.insert(cutoff, "-" * 28 + " playoff line")
+        rows.insert(cutoff, "-" * 12 + " playoff line " + "-" * 12)
 
     return "\n".join(["Current Standings", ""] + rows)
 
@@ -150,29 +168,35 @@ def build_matchups(league, week=None, box_scores=None):
     if not games:
         return NO_MATCHUP_DATA
 
-    records = _align_records(
-        [f"{t.wins}-{t.losses}" for m in games for t in (m.home, m.away)]
-    )
-    width = _name_width([m.home.name for m in games])
-    rows = [
-        f"{_clip(m.home.name, width):<{width}} ({home}) vs ({away}) {m.away.name}"
-        for m, home, away in zip(games, records[::2], records[1::2])
-    ]
+    teams = [t for m in games for t in (m.home, m.away)]
+    # Before anyone has played, every record is 0-0 -- a column of noise. They
+    # appear only once they mean something.
+    played_yet = any(team.wins or team.losses for team in teams)
+    width = _name_width([t.name for t in teams])
+
+    rows = [f"{_clip(m.home.name, width)} vs {m.away.name}" for m in games]
+    if played_yet:
+        records = _align_records([f"{t.wins}-{t.losses}" for t in teams])
+        rows += [""]
+        rows += [
+            f"{_clip(m.home.name, width):<{width}} ({home}) vs ({away}) {m.away.name}"
+            for m, home, away in zip(games, records[::2], records[1::2])
+        ]
+
     return "\n".join(["Matchups", ""] + rows)
 
 
 def build_close_scores(league, week=None, box_scores=None, threshold=15.0):
     box_scores = box_scores if box_scores is not None else league.box_scores(week)
-    games = _played(box_scores)
-    width = _name_width([m.home.name for m in games])
 
+    games = _played(box_scores)
+    tags = _tags_for(league, games)
     rows = []
     for m in games:
-        margin = abs(m.home_score - m.away_score)
-        if margin <= threshold:
+        if abs(m.home_score - m.away_score) <= threshold:
             rows.append(
-                f"{_clip(m.home.name, width):<{width}} {m.home_score:>7.2f} - "
-                f"{m.away_score:>7.2f} {m.away.name}"
+                f"{tags[m.home.roster_id]} {m.home_score:6.2f} - "
+                f"{m.away_score:6.2f} {tags[m.away.roster_id]}"
             )
     if not rows:
         return ""
@@ -253,23 +277,23 @@ def build_trophies(league, week=None, box_scores=None):
     text = [
         "Trophies of the week:",
         "",
-        "**👑 High score 👑**",
+        "👑 High score 👑",
         f"{high_team.name} with {high_score:.2f} points",
         "",
-        "**💩 Low score 💩**",
+        "💩 Low score 💩",
         f"{low_team.name} with {low_score:.2f} points",
     ]
 
     if blowout_winner:
         text += [
             "",
-            "**😱 Blow out 😱**",
+            "😱 Blow out 😱",
             f"{blowout_winner.name} blew out {blowout_loser.name} by {blowout_margin:.2f} points",
         ]
     if close_winner:
         text += [
             "",
-            "**😅 Close win 😅**",
+            "😅 Close win 😅",
             f"{close_winner.name} barely beat {close_loser.name} by {close_margin:.2f} points",
         ]
 
@@ -307,15 +331,16 @@ def _luck_trophies(games):
 
     return [
         "",
-        "**🍀 Lucky 🍀**",
+        "🍀 Lucky 🍀",
         f"{lucky.name} was {lucky_w}-{lucky_l} against the league, but still got the win",
         "",
-        "**😡 Unlucky 😡**",
+        "😡 Unlucky 😡",
         f"{unlucky.name} was {unlucky_w}-{unlucky_l} against the league, but still took an L",
     ]
 
 
-def _manager_trophies(league, games):
+def _manager_scores(league, games):
+    """(team, actual, optimal, percent) per team, best-managed lineup first."""
     scored = []
     for m in games:
         for team, entry, actual in (
@@ -328,20 +353,24 @@ def _manager_trophies(league, games):
             if optimal <= 0:
                 continue
             scored.append((team, actual, optimal, 100.0 * actual / optimal))
+    scored.sort(key=lambda s: s[3], reverse=True)
+    return scored
 
+
+def _manager_trophies(league, games):
+    scored = _manager_scores(league, games)
     if not scored:
         return []
 
-    scored.sort(key=lambda s: s[3], reverse=True)
     best_team, _, _, best_pct = scored[0]
     worst_team, worst_actual, worst_optimal, worst_pct = scored[-1]
 
     return [
         "",
-        "**🤖 Best Manager 🤖**",
+        "🤖 Best Manager 🤖",
         f"{best_team.name} scored {best_pct:.2f}% of their optimal score!",
         "",
-        "**🤡 Worst Manager 🤡**",
+        "🤡 Worst Manager 🤡",
         f"{worst_team.name} left {worst_optimal - worst_actual:.2f} points on their bench. "
         f"Only scoring {worst_pct:.2f}% of their optimal score.",
     ]
@@ -360,16 +389,10 @@ def build_power_rankings(league, week=None):
         return NO_MATCHUP_DATA
 
     team_by_roster = {t.roster_id: t for t in league.teams()}
-    peak = max(score for _, score in ranking) or 1.0
-    ranked = [(pos, team_by_roster[rid], score)
-              for pos, (rid, score) in enumerate(ranking, start=1)
-              if rid in team_by_roster]
-    width = _name_width([team.name for _, team, _ in ranked])
-
     rows = [
-        f"{pos:2}. {_clip(team.name, width):<{width}} "
-        f"{_bar(score, peak):<{BAR_WIDTH + 1}} {score:5.1f}"
-        for pos, team, score in ranked
+        f"{score:5.2f} - {team_by_roster[rid].name}"
+        for rid, score in ranking
+        if rid in team_by_roster
     ]
     return "\n".join(["Power Rankings", ""] + rows)
 
@@ -409,6 +432,292 @@ def build_monitor(league, week=None, box_scores=None):
     return "Starting Players to Monitor\n\n" + "\n\n".join(blocks)
 
 
+def season_weeks(league, through=None):
+    """
+    Completed weeks of this season, as {week: box_scores}. The league caches
+    each fetch, so the reports that all walk the season share one set of calls.
+    """
+    last = through if through is not None else league.current_week - 1
+    weeks = {}
+    for week in range(1, max(last, 0) + 1):
+        games = _played(league.box_scores(week))
+        if games:
+            weeks[week] = games
+    return weeks
+
+
+def _weekly_fortune(games):
+    """
+    Per team: how many opponents it outscored this week, against how many it
+    actually needed to. Winning with a bottom-half score is luck; losing with a
+    top-half one is not.
+    """
+    records = _all_play_records(games)
+    fortune = {}
+    for m in games:
+        if m.home_score == m.away_score:
+            continue
+        winner = m.home if m.home_score > m.away_score else m.away
+        loser = m.away if m.home_score > m.away_score else m.home
+        for team, won in ((winner, True), (loser, False)):
+            beat, lost_to = records[team.roster_id]
+            total = beat + lost_to
+            if not total:
+                continue
+            # Share of the league you beat, versus the result you got.
+            expected = beat / total
+            fortune[team.roster_id] = round(100 * ((1.0 if won else 0.0) - expected))
+    return fortune
+
+
+def build_fortune_index(league, week=None):
+    week = week if week is not None else league.current_week - 1
+    weeks = season_weeks(league, through=week)
+    if not weeks:
+        return NO_MATCHUP_DATA
+
+    totals = {}
+    for games in weeks.values():
+        for roster_id, score in _weekly_fortune(games).items():
+            totals[roster_id] = totals.get(roster_id, 0) + score
+
+    team_by_roster = {t.roster_id: t for t in league.teams()}
+    ranked = sorted(totals.items(), key=lambda item: item[1], reverse=True)
+    if not ranked:
+        return NO_MATCHUP_DATA
+
+    width = _name_width([team_by_roster[r].name for r, _ in ranked if r in team_by_roster])
+    rows = []
+    for pos, (roster_id, score) in enumerate(ranked, start=1):
+        team = team_by_roster.get(roster_id)
+        if not team:
+            continue
+        if pos == 1:
+            mark = "👑"
+        elif pos == 2:
+            mark = "🍀"
+        elif pos == len(ranked):
+            mark = "💀"
+        elif pos == len(ranked) - 1:
+            mark = "😡"
+        else:
+            mark = "  "
+        rows.append(f"{pos:2}. {mark} {_clip(team.name, width):<{width}} - {score:+d}")
+
+    return "\n".join([f"Fortune Index - Week {week}", ""] + rows)
+
+
+def build_win_matrix(league):
+    """Standings with the schedule taken out: everyone plays everyone, weekly."""
+    weeks = season_weeks(league)
+    if len(weeks) < MIN_WEEKS_FOR_SEASON_REPORTS:
+        return ""
+
+    tally = {}
+    for games in weeks.values():
+        for roster_id, (wins, losses) in _all_play_records(games).items():
+            won, lost = tally.get(roster_id, (0, 0))
+            tally[roster_id] = (won + wins, lost + losses)
+
+    team_by_roster = {t.roster_id: t for t in league.teams()}
+    ranked = sorted(
+        tally.items(),
+        key=lambda item: item[1][0] / max(item[1][0] + item[1][1], 1),
+        reverse=True,
+    )
+
+    width = _name_width([team_by_roster[r].name for r, _ in ranked if r in team_by_roster])
+    records = _align_records([f"{w}-{l}" for _, (w, l) in ranked])
+    rows = [
+        f"{pos:2}. {_clip(team_by_roster[rid].name, width):<{width}} ({record})"
+        for pos, ((rid, _), record) in enumerate(zip(ranked, records), start=1)
+        if rid in team_by_roster
+    ]
+    return "\n".join(["Standings if everyone played every team every week", ""] + rows)
+
+
+# Trophy Case columns, in display order.
+TROPHY_ICONS = ["👑", "💩", "😱", "😅", "🍀", "😡", "🤖", "🤡"]
+
+
+def weekly_trophy_winners(league, games):
+    """
+    Which roster won each Trophy Case column this week, in TROPHY_ICONS order.
+    Returns a list the same length, with None where nothing was awarded.
+    """
+    scores = [(m.home_score, m.home) for m in games] + [(m.away_score, m.away) for m in games]
+    high = max(scores, key=lambda s: s[0])[1]
+    low = min(scores, key=lambda s: s[0])[1]
+
+    blowout = close = None
+    best_margin, tight_margin = -1.0, None
+    for m in games:
+        margin = abs(m.home_score - m.away_score)
+        if margin == 0:
+            continue
+        winner = m.home if m.home_score > m.away_score else m.away
+        if margin > best_margin:
+            best_margin, blowout = margin, winner
+        if tight_margin is None or margin < tight_margin:
+            tight_margin, close = margin, winner
+
+    lucky = unlucky = None
+    luck = _luck_trophies(games)
+    if luck:
+        lucky_name = luck[2].split(" was ")[0]
+        unlucky_name = luck[5].split(" was ")[0]
+        by_name = {t.name: t for _, t in scores}
+        lucky, unlucky = by_name.get(lucky_name), by_name.get(unlucky_name)
+
+    best_mgr = worst_mgr = None
+    managers = _manager_scores(league, games)
+    if managers:
+        best_mgr = managers[0][0]
+        worst_mgr = managers[-1][0]
+
+    return [high, low, blowout, close, lucky, unlucky, best_mgr, worst_mgr]
+
+
+def build_trophy_case(league):
+    weeks = season_weeks(league)
+    if len(weeks) < MIN_WEEKS_FOR_SEASON_REPORTS:
+        return ""
+
+    tally = {t.roster_id: [0] * len(TROPHY_ICONS) for t in league.teams()}
+    for games in weeks.values():
+        for column, team in enumerate(weekly_trophy_winners(league, games)):
+            if team is not None and team.roster_id in tally:
+                tally[team.roster_id][column] += 1
+
+    team_by_roster = {t.roster_id: t for t in league.teams()}
+    ranked = sorted(tally.items(), key=lambda item: sum(item[1]), reverse=True)
+    width = _name_width([t.name for t in league.teams()])
+
+    # An emoji occupies roughly two monospace cells, so each column is the
+    # emoji plus two spaces; counts pad to the same four to stay under them.
+    rows = [" " * (width + 2) + "  ".join(TROPHY_ICONS)]
+    for roster_id, counts in ranked:
+        team = team_by_roster.get(roster_id)
+        if not team:
+            continue
+        cells = "".join(f"{(str(c) if c else '·'):<4}" for c in counts).rstrip()
+        rows.append(f"{_clip(team.name, width):<{width}}  {cells}")
+
+    legend = "👑 high  💩 low  😱 blowout  😅 close  🍀 lucky  😡 unlucky  🤖 best  🤡 worst"
+    return "\n".join([f"Trophy Case - through week {max(weeks)}", ""] + rows + ["", legend])
+
+
+def season_score_series(league):
+    """{week: {roster_id: score}} for every completed week -- chart input."""
+    series = {}
+    for week, games in season_weeks(league).items():
+        series[week] = {}
+        for m in games:
+            series[week][m.home.roster_id] = m.home_score
+            series[week][m.away.roster_id] = m.away_score
+    return series
+
+
+def standings_rank_series(league):
+    """{week: {roster_id: rank}} by cumulative record, week by week."""
+    tally = {}
+    series = {}
+    for week, games in sorted(season_weeks(league).items()):
+        for m in games:
+            winner = m.home if m.home_score > m.away_score else m.away
+            loser = m.away if m.home_score > m.away_score else m.home
+            for team, won in ((winner, True), (loser, False)):
+                wins, losses, points = tally.get(team.roster_id, (0, 0, 0.0))
+                tally[team.roster_id] = (wins + int(won), losses + int(not won), points)
+            tally[m.home.roster_id] = (
+                tally[m.home.roster_id][0], tally[m.home.roster_id][1],
+                tally[m.home.roster_id][2] + m.home_score,
+            )
+            tally[m.away.roster_id] = (
+                tally[m.away.roster_id][0], tally[m.away.roster_id][1],
+                tally[m.away.roster_id][2] + m.away_score,
+            )
+        order = sorted(tally.items(), key=lambda item: (-item[1][0], -item[1][2]))
+        series[week] = {rid: pos for pos, (rid, _) in enumerate(order, start=1)}
+    return series
+
+
+def power_rank_series(league):
+    """{week: {roster_id: rank}} from the power-ranking model, week by week."""
+    weeks = season_weeks(league)
+    series = {}
+    running = {}
+    for week in sorted(weeks):
+        for m in weeks[week]:
+            running.setdefault(m.home.roster_id, []).append(m.home_score)
+            running.setdefault(m.away.roster_id, []).append(m.away_score)
+        ranking = pr.compute_power_rankings({k: list(v) for k, v in running.items()})
+        series[week] = {rid: pos for pos, (rid, _) in enumerate(ranking, start=1)}
+    return series
+
+
+def bench_point_totals(league):
+    """{roster_id: points left on the bench across the season}."""
+    totals = {}
+    for games in season_weeks(league).values():
+        for m in games:
+            totals[m.home.roster_id] = totals.get(m.home.roster_id, 0.0) + m.home_bench_points
+            totals[m.away.roster_id] = totals.get(m.away.roster_id, 0.0) + m.away_bench_points
+    return totals
+
+
+def team_names(league):
+    return {t.roster_id: t.name for t in league.teams()}
+
+
+def build_trades(league, week=None, today=None):
+    """
+    Completed trades, announced the way GameDayBot does: each side's haul
+    listed under the team receiving it, players and draft picks together.
+    """
+    week = week or league.current_week
+    today = today or date.today().strftime("%Y-%m-%d")
+    team_by_roster = {t.roster_id: t for t in league.teams()}
+
+    blocks = []
+    for txn in league.raw_transactions(week):
+        if txn.get("type") != "trade" or txn.get("status") != "complete":
+            continue
+        stamp = txn.get("status_updated")
+        if stamp is None:
+            continue
+        if datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%d") != today:
+            continue
+
+        haul = {rid: [] for rid in txn.get("roster_ids") or []}
+        for player_id, roster_id in (txn.get("adds") or {}).items():
+            haul.setdefault(roster_id, []).append(
+                f"{league.player_position(player_id)} {league.player_name(player_id)}"
+            )
+        for pick in txn.get("draft_picks") or []:
+            haul.setdefault(pick.get("owner_id"), []).append(
+                f"{pick.get('season')} round {pick.get('round')} pick"
+            )
+        for money in txn.get("waiver_budget") or []:
+            haul.setdefault(money.get("receiver"), []).append(
+                f"${money.get('amount')} FAAB"
+            )
+
+        lines = ["Status: EXECUTED"]
+        for roster_id, items in haul.items():
+            team = team_by_roster.get(roster_id)
+            if not team or not items:
+                continue
+            lines.append(f"{team.name} receives:")
+            lines += [f"  • {item}" for item in items]
+        if len(lines) > 1:
+            blocks.append("\n".join(lines))
+
+    if not blocks:
+        return ""
+    return "🚨TRADE ANNOUNCEMENT🚨\n\n" + "\n\n".join(blocks)
+
+
 def build_waiver_report(league, week=None, today=None):
     week = week or league.current_week
     today = today or date.today().strftime("%Y-%m-%d")
@@ -417,11 +726,11 @@ def build_waiver_report(league, week=None, today=None):
     for item in league.transactions_for_week(week):
         if item.status_updated is None:
             continue
-        txn_date = datetime.utcfromtimestamp(item.status_updated / 1000).strftime("%Y-%m-%d")
+        txn_date = datetime.fromtimestamp(item.status_updated / 1000, timezone.utc).strftime("%Y-%m-%d")
         if txn_date != today:
             continue
 
-        lines = [f"**{item.team_name}**"]
+        lines = [item.team_name]
         for add in item.adds:
             suffix = f" (${item.faab})" if item.faab is not None else ""
             lines.append(f"ADDED {add}{suffix}")
