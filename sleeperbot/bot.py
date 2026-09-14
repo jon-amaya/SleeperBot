@@ -42,20 +42,22 @@ def bot(function, config=None, league=None):
         text = formatting.build_power_rankings(league)
     elif function == "get_waiver_report":
         text = formatting.build_waiver_report(league)
+    elif function == "get_monitor":
+        text = formatting.build_monitor(league)
     elif function == "get_final":
         week = league.current_week - 1
         box_scores = league.box_scores(week)
-        scores = formatting.build_scoreboard(league, week=week, box_scores=box_scores)
+        scores = formatting.build_scoreboard(league, week=week, box_scores=box_scores, final=True)
         if scores == formatting.NO_MATCHUP_DATA:
             text = scores
         else:
             trophies = formatting.build_trophies(league, week=week, box_scores=box_scores)
-            text = f"Final {scores}\n\n{trophies}"
+            text = f"{scores}\n\n{trophies}"
     elif function == "init":
         text = config.get("init_msg", "")
     else:
         logger.warning("Unknown function: %s", function)
         return
 
-    if text:
+    if formatting.has_sendable_content(text):
         send_message(config["webhook_url"], text)

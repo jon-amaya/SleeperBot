@@ -80,6 +80,10 @@ class SleeperBotClient(discord.Client):
         async def waiver_report(interaction: discord.Interaction):
             await respond(interaction, formatting.build_waiver_report)
 
+        @tree.command(name="monitor", description="Injured starters to check before kickoff")
+        async def monitor(interaction: discord.Interaction):
+            await respond(interaction, formatting.build_monitor)
+
     async def setup_hook(self):
         guild_id = self.config.get("guild_id")
         if guild_id:

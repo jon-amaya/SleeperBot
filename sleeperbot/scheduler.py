@@ -10,6 +10,7 @@ from sleeperbot.config import load_config
 # standings:       wednesday morning at 7:30am local time.
 # waiver report:   wednesday morning at 7:31am local time (or daily).
 # matchups:        thursday evening at 7:30pm east coast time.
+# monitor:         sunday morning at 7:30am local time.
 # scoreboard:      friday and monday mornings, and sunday afternoon/evening.
 
 
@@ -53,6 +54,11 @@ def _add_jobs(sched, config):
     sched.add_job(
         bot, "cron", ["get_scoreboard"], id="scoreboard1",
         day_of_week="fri,mon", hour=7, minute=30,
+        start_date=start_date, end_date=end_date, timezone=my_tz, replace_existing=True,
+    )
+    sched.add_job(
+        bot, "cron", ["get_monitor"], id="monitor",
+        day_of_week="sun", hour=7, minute=30,
         start_date=start_date, end_date=end_date, timezone=my_tz, replace_existing=True,
     )
     sched.add_job(
