@@ -20,15 +20,6 @@ NO_TROPHY_DATA = "No matchup data available for trophies."
 
 _NO_DATA_SENTINELS = frozenset({NO_MATCHUP_DATA, NO_TROPHY_DATA})
 
-# Sleeper has no team-abbreviation field, so reports lead with team names and
-# pad them to a common column instead. The column is sized to the longest name
-# actually in the league rather than a fixed width, so nothing is truncated
-# unless someone picks a genuinely absurd name -- past MAX_NAME_WIDTH the line
-# gets wide enough to wrap on a phone, which is worse than clipping one team.
-MAX_NAME_WIDTH = 24
-BAR_WIDTH = 12
-_EIGHTHS = "▏▎▍▌▋▊▉█"
-
 FLEX_ELIGIBILITY = {
     "FLEX": {"RB", "WR", "TE"},
     "WRRB_FLEX": {"RB", "WR"},
@@ -39,17 +30,18 @@ FLEX_ELIGIBILITY = {
 BENCH_SLOTS = {"BN", "IR", "TAXI"}
 
 
-# Per-report presentation: emoji title, embed colour, and whether the body is a
-# table. Column padding only survives in a code block -- Discord renders normal
-# message text in a proportional font, where the padding collapses -- so every
-# tabular report sets monospace. Prose-style reports read better without it.
+# Per-report presentation: emoji title, embed colour, and whether the body is
+# monospace. Nothing sets monospace: a code block is the only place column
+# padding survives, but it also forces a terminal font that looks out of place
+# in Discord. Every report is written to read without alignment instead, using
+# markdown for emphasis -- which a code block would render literally.
 REPORT_STYLE = {
-    "get_scoreboard": ("🏈 Score Update", 0x3498DB, True),
-    "get_final": ("🏁 Final Score", 0x3498DB, True),
-    "get_standings": ("📊 Current Standings", 0xF1C40F, True),
-    "get_matchups": ("📅 Matchups", 0x2ECC71, True),
-    "get_close_scores": ("⚡ Close Scores", 0x3498DB, True),
-    "get_power_rankings": ("💪 Power Rankings", 0x9B59B6, True),
+    "get_scoreboard": ("🏈 Score Update", 0x3498DB, False),
+    "get_final": ("🏁 Final Score", 0x3498DB, False),
+    "get_standings": ("📊 Current Standings", 0xF1C40F, False),
+    "get_matchups": ("📅 Matchups", 0x2ECC71, False),
+    "get_close_scores": ("⚡ Close Scores", 0x3498DB, False),
+    "get_power_rankings": ("💪 Power Rankings", 0x9B59B6, False),
     "get_trophies": ("🏆 Trophies of the Week", 0xE67E22, False),
     "get_waiver_report": ("💰 Waiver Report", 0x1ABC9C, False),
     "get_monitor": ("🚑 Players to Monitor", 0xE74C3C, False),
@@ -76,70 +68,34 @@ def _played(box_scores):
     return [m for m in box_scores if not m.is_bye]
 
 
-def _clip(name, width):
-    return name if len(name) <= width else name[: width - 1] + "…"
-
-
-def _name_width(names):
-    """Width of the team-name column: the longest name present, within reason."""
-    return min(max((len(n) for n in names), default=0), MAX_NAME_WIDTH)
-
-
-def _bar(value, peak, width=BAR_WIDTH):
-    if peak <= 0:
-        return ""
-    filled = (value / peak) * width
-    full = int(filled)
-    out = "█" * full
-    remainder = filled - full
-    if remainder >= 0.0625 and full < width:
-        out += _EIGHTHS[min(int(remainder * 8), 7)]
-    return out
-
-
-def _align_records(records):
-    """Pad W-L records so wins right-align and losses left-align in a column."""
-    parts = [r.split("-", 1) for r in records]
-    wins_w = max((len(w) for w, _ in parts), default=0)
-    rest_w = max((len(r) for _, r in parts), default=0)
-    return [f"{w:>{wins_w}}-{r:<{rest_w}}" for w, r in parts]
-
-
 def build_scoreboard(league, week=None, box_scores=None, final=False):
     box_scores = box_scores if box_scores is not None else league.box_scores(week)
     games = _played(box_scores)
     if not games:
         return NO_MATCHUP_DATA
 
-    peak = max(max(m.home_score, m.away_score) for m in games)
-    width = _name_width([t.name for m in games for t in (m.home, m.away)])
-
-    blocks = []
+    rows = []
     for m in games:
         if m.home_score >= m.away_score:
             win, lose, ws, ls = m.home, m.away, m.home_score, m.away_score
         else:
             win, lose, ws, ls = m.away, m.home, m.away_score, m.home_score
-        blocks.append(
-            f"{_clip(win.name, width):<{width}} {ws:>7.2f} {_bar(ws, peak):<{BAR_WIDTH + 1}}\n"
-            f"{_clip(lose.name, width):<{width}} {ls:>7.2f} {_bar(ls, peak):<{BAR_WIDTH + 1}}{ls - ws:>7.2f}"
-        )
+        rows.append(f"**{win.name} {ws:.2f}** — {ls:.2f} {lose.name}")
 
     header = "Final Score Update" if final else "Score Update"
-    return "\n".join([header, ""] + ["\n\n".join(blocks)])
+    return "\n".join([header, ""] + rows)
 
 
 def build_standings(league):
     standings = league.standings()
-    records = _align_records([f"{t.wins}-{t.losses}" for t in standings])
     rows = [
-        f"{pos:2}: ({record}) {team.name}"
-        for pos, (team, record) in enumerate(zip(standings, records), start=1)
+        f"**{pos}.** {team.name} ({team.wins}-{team.losses})"
+        for pos, team in enumerate(standings, start=1)
     ]
 
     cutoff = league.playoff_teams
     if 0 < cutoff < len(rows):
-        rows.insert(cutoff, "-" * 28 + " playoff line")
+        rows.insert(cutoff, "─────── playoff line ───────")
 
     return "\n".join(["Current Standings", ""] + rows)
 
@@ -150,53 +106,30 @@ def build_matchups(league, week=None, box_scores=None):
     if not games:
         return NO_MATCHUP_DATA
 
-    # One team per line, each next to its own record, seeded by current
-    # standings position -- a single line pairing both teams runs wide enough
-    # to scroll sideways on a phone, and puts the away record before the away
-    # team it belongs to.
-    seed = {team.roster_id: pos for pos, team in enumerate(league.standings(), start=1)}
     teams = [t for m in games for t in (m.home, m.away)]
-    width = _name_width([t.name for t in teams])
-    records = dict(
-        zip(
-            (t.roster_id for t in teams),
-            _align_records([f"{t.wins}-{t.losses}" for t in teams]),
-        )
-    )
-
-    # Before anyone has played, every record is 0-0 and the standings order is
-    # arbitrary. Printing both columns would imply a pecking order that does
-    # not exist yet, so week one lists names only.
+    # Before anyone has played, every record is 0-0. Printing them would add a
+    # column of noise, so they only appear once they mean something.
     played_yet = any(team.wins or team.losses for team in teams)
 
-    blocks = []
-    for m in games:
-        lines = []
-        for team in (m.home, m.away):
-            if played_yet:
-                lines.append(
-                    f"{seed.get(team.roster_id, 0):2}  "
-                    f"{_clip(team.name, width):<{width}}  {records[team.roster_id]}"
-                )
-            else:
-                lines.append(_clip(team.name, width))
-        blocks.append("\n".join(lines))
+    def label(team):
+        if played_yet:
+            return f"**{team.name}** ({team.wins}-{team.losses})"
+        return f"**{team.name}**"
 
-    return "\n".join(["Matchups", ""] + ["\n\n".join(blocks)])
+    rows = [f"{label(m.home)} vs {label(m.away)}" for m in games]
+    return "\n".join(["Matchups", ""] + rows)
 
 
 def build_close_scores(league, week=None, box_scores=None, threshold=15.0):
     box_scores = box_scores if box_scores is not None else league.box_scores(week)
-    games = _played(box_scores)
-    width = _name_width([m.home.name for m in games])
 
     rows = []
-    for m in games:
+    for m in _played(box_scores):
         margin = abs(m.home_score - m.away_score)
         if margin <= threshold:
             rows.append(
-                f"{_clip(m.home.name, width):<{width}} {m.home_score:>7.2f} - "
-                f"{m.away_score:>7.2f} {m.away.name}"
+                f"**{m.home.name} {m.home_score:.2f}** — "
+                f"**{m.away_score:.2f} {m.away.name}** · {margin:.2f} apart"
             )
     if not rows:
         return ""
@@ -384,16 +317,10 @@ def build_power_rankings(league, week=None):
         return NO_MATCHUP_DATA
 
     team_by_roster = {t.roster_id: t for t in league.teams()}
-    peak = max(score for _, score in ranking) or 1.0
-    ranked = [(pos, team_by_roster[rid], score)
-              for pos, (rid, score) in enumerate(ranking, start=1)
-              if rid in team_by_roster]
-    width = _name_width([team.name for _, team, _ in ranked])
-
     rows = [
-        f"{pos:2}. {_clip(team.name, width):<{width}} "
-        f"{_bar(score, peak):<{BAR_WIDTH + 1}} {score:5.1f}"
-        for pos, team, score in ranked
+        f"**{pos}.** {team_by_roster[rid].name} — {score:.1f}"
+        for pos, (rid, score) in enumerate(ranking, start=1)
+        if rid in team_by_roster
     ]
     return "\n".join(["Power Rankings", ""] + rows)
 
