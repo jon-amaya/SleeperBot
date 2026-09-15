@@ -36,25 +36,37 @@ BENCH_SLOTS = {"BN", "IR", "TAXI"}
 # proportional font. Prose reports stay outside one so their emoji keep their
 # colour and markdown still renders.
 REPORT_STYLE = {
-    "get_scoreboard": ("🏈 Score Update", 0x3498DB, True),
-    "get_final": ("🏁 Final Score Update", 0x3498DB, True),
-    "get_standings": ("📊 Current Standings", 0xF1C40F, True),
-    "get_matchups": ("📅 Matchups", 0x2ECC71, True),
-    "get_close_scores": ("⚡ Close Scores", 0x3498DB, True),
-    "get_power_rankings": ("💪 Power Rankings", 0x9B59B6, True),
-    "get_fortune_index": ("🎲 Fortune Index", 0x9B59B6, True),
-    "get_win_matrix": ("🔢 Win Matrix", 0xF1C40F, True),
-    "get_trophy_case": ("👑 Trophy Case", 0xE67E22, True),
-    "get_trophies": ("🏆 Trophies of the Week", 0xE67E22, False),
-    "get_waiver_report": ("💰 Waiver Report", 0x1ABC9C, False),
-    "get_monitor": ("🚑 Players to Monitor", 0xE74C3C, False),
-    "get_trades": ("🚨 Trade Announcement", 0xE91E63, False),
+    "get_scoreboard": ("Score Update", 0x3498DB, True),
+    "get_final": ("Final Score Update", 0x3498DB, True),
+    "get_standings": ("Current Standings", 0xF1C40F, True),
+    "get_matchups": ("Matchups", 0x2ECC71, True),
+    "get_close_scores": ("Close Scores", 0x3498DB, True),
+    "get_power_rankings": ("Power Rankings", 0x9B59B6, True),
+    "get_fortune_index": ("Fortune Index", 0x9B59B6, True),
+    "get_win_matrix": ("Win Matrix", 0xF1C40F, True),
+    "get_trophy_case": ("Trophy Case", 0xE67E22, True),
+    "get_trophies": ("Trophies of the Week", 0xE67E22, False),
+    "get_waiver_report": ("Waiver Report", 0x1ABC9C, False),
+    "get_monitor": ("Players to Monitor", 0xE74C3C, False),
+    "get_trades": ("Trade Announcement", 0xE91E63, False),
 }
 DEFAULT_STYLE = ("SleeperBot", 0x99AAB5, False)
 
 # Win Matrix and Trophy Case only say anything once there is a season to
 # summarise, so both hold until this many weeks are complete.
 MIN_WEEKS_FOR_SEASON_REPORTS = 2
+
+
+# Discord colours text inside a code fence only through ANSI escapes, and only
+# when the fence is tagged ```ansi. Cyan on the identifiers, default on
+# everything else -- the palette GameDayBot's tables use. Clients that ignore
+# ANSI (most mobile ones) simply render it uncoloured, losing nothing.
+ANSI_CYAN = "\x1b[0;36m"
+ANSI_RESET = "\x1b[0m"
+
+
+def cyan(text):
+    return f"{ANSI_CYAN}{text}{ANSI_RESET}"
 
 
 def has_sendable_content(message):
@@ -140,7 +152,8 @@ def build_scoreboard(league, week=None, box_scores=None, final=False):
 
     tags = _tags_for(league, games)
     rows = [
-        f"{tags[m.home.roster_id]} {m.home_score:6.2f} - {m.away_score:6.2f} {tags[m.away.roster_id]}"
+        f"{cyan(tags[m.home.roster_id])} {m.home_score:6.2f} - "
+        f"{m.away_score:6.2f} {cyan(tags[m.away.roster_id])}"
         for m in games
     ]
     header = "Final Score Update" if final else "Score Update"
@@ -151,7 +164,7 @@ def build_standings(league):
     standings = league.standings()
     records = _align_records([f"{t.wins}-{t.losses}" for t in standings])
     rows = [
-        f"{pos:2}: ({record}) {team.name}"
+        f"{pos:2}: ({record}) {cyan(team.name)}"
         for pos, (team, record) in enumerate(zip(standings, records), start=1)
     ]
 
@@ -195,8 +208,8 @@ def build_close_scores(league, week=None, box_scores=None, threshold=15.0):
     for m in games:
         if abs(m.home_score - m.away_score) <= threshold:
             rows.append(
-                f"{tags[m.home.roster_id]} {m.home_score:6.2f} - "
-                f"{m.away_score:6.2f} {tags[m.away.roster_id]}"
+                f"{cyan(tags[m.home.roster_id])} {m.home_score:6.2f} - "
+                f"{m.away_score:6.2f} {cyan(tags[m.away.roster_id])}"
             )
     if not rows:
         return ""
@@ -390,7 +403,7 @@ def build_power_rankings(league, week=None):
 
     team_by_roster = {t.roster_id: t for t in league.teams()}
     rows = [
-        f"{score:5.2f} - {team_by_roster[rid].name}"
+        f"{score:5.2f} - {cyan(team_by_roster[rid].name)}"
         for rid, score in ranking
         if rid in team_by_roster
     ]

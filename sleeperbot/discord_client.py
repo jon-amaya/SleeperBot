@@ -6,7 +6,7 @@ import requests
 # description at 4096. A code fence costs 8 of those.
 DISCORD_MESSAGE_LIMIT = 2000
 EMBED_DESCRIPTION_LIMIT = 4096
-CODE_FENCE_OVERHEAD = 8
+CODE_FENCE_OVERHEAD = 12  # ```ansi\n ... \n```
 
 
 def chunk_message(text, limit=DISCORD_MESSAGE_LIMIT):
@@ -38,7 +38,9 @@ def build_embeds(title, body, color, monospace, footer=None):
 
     embeds = []
     for index, chunk in enumerate(chunks):
-        description = f"```\n{chunk}\n```" if monospace else chunk
+        # The ansi tag is what lets the escape codes in the body render as
+        # colour; a bare fence would print them as literal characters.
+        description = f"```ansi\n{chunk}\n```" if monospace else chunk
         embed = {"description": description, "color": color}
         if index == 0:
             embed["title"] = title
